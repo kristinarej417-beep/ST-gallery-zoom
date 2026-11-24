@@ -154,8 +154,39 @@
     load();
   }
 
-  // Перехватываем нажатия на миниатюры, чтобы не открывался штатный просмотрщик
-  ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'click']
+    // Перехватываем нажатия на миниатюры, чтобы не открывался штатный просмотрщик
+  let down = null;
+  const thumbOf = e => {
+    const th = e.target.closest && e.target.closest(THUMB);
+    return th && th.closest(ROOT) ? th : null;
+  };
+
+  ['mousedown', 'mouseup', 'touchstart', 'touchend', 'click'].forEach(type =>
+    window.addEventListener(type, e => {
+      if (!thumbOf(e)) return;
+      e.stopImmediatePropagation();
+      if (type === 'click') e.preventDefault();
+    }, true));
+
+  window.addEventListener('pointerdown', e => {
+    if (!thumbOf(e)) return;
+    down = { x: e.clientX, y: e.clientY };
+    e.stopImmediatePropagation();
+  }, true);
+
+  window.addEventListener('pointerup', e => {
+    const th = thumbOf(e);
+    if (!th) return;
+    e.stopImmediatePropagation();
+    if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) { down = null; return; }
+    down = null;
+    try {
+      if (!urlOf(th)) { alert('Gallery Zoom: не нашёл адрес картинки'); return; }
+      open(th);
+    } catch (err) {
+      alert('Gallery Zoom: ' + err.message);
+    }
+  }, true);
     .forEach(type => window.addEventListener(type, e => {
       const th = e.target.closest && e.target.closest(THUMB);
       if (!th || !th.closest(ROOT) || !urlOf(th)) return;
