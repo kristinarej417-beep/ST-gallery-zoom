@@ -52,7 +52,11 @@
   }
 
   function close() {
-    if (ov) { ov.remove(); ov = null; }
+    if (ov) {
+      const d = ov; ov = null;
+      try { d.close(); } catch (e) {}
+      d.remove();
+    }
   }
 
   function open(thumb) {
@@ -62,8 +66,9 @@
       .map(t => ({ t, url: urlOf(t) })).filter(x => x.url);
     idx = Math.max(0, list.findIndex(x => x.t === thumb));
 
-    ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.95);touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden';
+    ov = document.createElement('dialog');
+    ov.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;padding:0;border:0;z-index:2147483000;background:rgba(0,0,0,.95);touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden';
+    ov.addEventListener('cancel', e => { e.preventDefault(); close(); });
 
     img = document.createElement('img');
     img.draggable = false;
@@ -153,12 +158,19 @@
       apply(false);
     }, { passive: false });
 
-    // Если галерея открыта в модальном <dialog>, оверлей должен лежать внутри него,
-    // иначе он окажется под диалогом и будет неактивным
-    const host = thumb.closest('dialog') || document.body;
-    host.appendChild(ov);
-    dbg('просмотрщик создан в ' + host.tagName + ', картинок: ' + list.length);
+    // Собственный модальный <dialog> попадает в top layer и лежит поверх любых панелей ST
+    document.body.appendChild(ov);
+    ov.showModal();
     load();
+    const total = root.querySelectorAll(THUMB).length;
+    dbg('показан. картинок: ' + list.length + ' из ' + total);
+    setTimeout(() => {
+      if (!ov) { dbg('просмотрщик был закрыт сам'); return; }
+      const top = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+      dbg('open=' + ov.open + ', ' + ov.clientWidth + 'x' + ov.clientHeight +
+        ', сверху: ' + (top ? top.tagName : 'нет') +
+        ', картинка: ' + (img.complete ? img.naturalWidth + 'x' + img.naturalHeight : 'грузится'));
+    }, 400);
   }
 
   // Перехватываем нажатия на миниатюры, чтобы не открывался штатный просмотрщик
