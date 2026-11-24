@@ -1,11 +1,7 @@
 (() => {
-  const DEBUG = true; // после проверки поставьте false
-  const dbg = m => { if (DEBUG) alert('Gallery Zoom: ' + m); };
-
   const THUMB = '.nGY2GThumbnail';
   const ROOT = '#dragGallery, #gallery, .nGY2Gallery';
-  let ov = null, img = null, counter = null, list = [], idx = 0;
-  let s = 1, tx = 0, ty = 0;
+  let win = null;
 
   function urlOf(th) {
     const im = th.querySelector('img');
@@ -19,158 +15,94 @@
     return u || null;
   }
 
-  function apply(anim) {
-    if (!ov) return;
-    const W = ov.clientWidth, H = ov.clientHeight;
-    if (s <= 1.01) { s = 1; tx = 0; ty = 0; }
-    else {
-      tx = Math.min(0, Math.max(W - W * s, tx));
-      ty = Math.min(0, Math.max(H - H * s, ty));
-    }
-    img.style.transition = anim ? 'transform .2s' : 'none';
-    img.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
-  }
-
-  function zoomAt(px, py, ns) {
-    ns = Math.min(8, Math.max(1, ns));
-    tx = px - (px - tx) * ns / s;
-    ty = py - (py - ty) * ns / s;
-    s = ns;
-  }
-
-  function load() {
-    s = 1; tx = 0; ty = 0;
-    img.src = list[idx].url;
-    if (counter) counter.textContent = `${idx + 1} / ${list.length}`;
-    apply(false);
-  }
-
-  function go(d) {
-    const n = idx + d;
-    if (n < 0 || n >= list.length) return;
-    idx = n; load();
-  }
-
   function close() {
-    if (ov) {
-      const d = ov; ov = null;
-      try { d.close(); } catch (e) {}
-      d.remove();
-    }
+    if (win) { win.remove(); win = null; }
   }
 
-  function open(thumb) {
+  function open(src) {
     close();
-    const root = thumb.closest(ROOT);
-    list = [...root.querySelectorAll(THUMB)]
-      .map(t => ({ t, url: urlOf(t) })).filter(x => x.url);
-    idx = Math.max(0, list.findIndex(x => x.t === thumb));
+    const w0 = Math.min(Math.round(innerWidth * 0.7), 360);
+    win = document.createElement('div');
+    // popover="manual" кладёт окно в top layer: оно поверх панели галереи,
+    // но остальной интерфейс остаётся активным (в отличие от модального <dialog>)
+    win.setAttribute('popover', 'manual');
+    win.style.cssText =
+      'position:fixed;inset:auto;margin:0;padding:0;border:0;overflow:visible;background:transparent;' +
+      `left:${innerWidth - w0 - 12}px;top:90px;width:${w0}px;height:auto;` +
+      'z-index:2147483000;touch-action:none;user-select:none;-webkit-user-select:none;' +
+      'border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.5)';
 
-    ov = document.createElement('dialog');
-    ov.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;padding:0;border:0;z-index:2147483000;background:rgba(0,0,0,.95);touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden';
-    ov.addEventListener('cancel', e => { e.preventDefault(); close(); });
-
-    img = document.createElement('img');
+    const img = document.createElement('img');
     img.draggable = false;
-    img.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;transform-origin:0 0;pointer-events:none;-webkit-user-drag:none;will-change:transform';
-    ov.appendChild(img);
+    img.style.cssText = 'display:block;width:100%;height:auto;border-radius:10px;pointer-events:none;-webkit-user-drag:none';
+    img.src = src;
 
-    const mkBtn = (txt, css, fn) => {
-      const b = document.createElement('div');
-      b.className = 'stt-btn';
-      b.textContent = txt;
-      b.style.cssText = 'position:absolute;width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;' + css;
-      b.addEventListener('click', e => { e.stopPropagation(); fn(); });
-      ov.appendChild(b);
-    };
-    mkBtn('✕', 'top:calc(env(safe-area-inset-top,0px) + 12px);right:12px', close);
-    if (list.length > 1) {
-      mkBtn('‹', 'left:8px;top:50%;margin-top:-22px', () => go(-1));
-      mkBtn('›', 'right:8px;top:50%;margin-top:-22px', () => go(1));
-      counter = document.createElement('div');
-      counter.style.cssText = 'position:absolute;bottom:14px;left:50%;transform:translateX(-50%);color:#fff;font-size:14px;background:rgba(0,0,0,.55);padding:3px 10px;border-radius:12px;pointer-events:none';
-      ov.appendChild(counter);
-    } else counter = null;
+    const btn = document.createElement('div');
+    btn.textContent = '✕';
+    btn.style.cssText = 'position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer';
+    btn.addEventListener('pointerdown', e => e.stopPropagation());
+    btn.addEventListener('pointerup', e => { e.stopPropagation(); close(); });
+
+    win.append(img, btn);
+    document.body.appendChild(win);
+    try { win.showPopover(); } catch (e) { /* старый браузер: останется обычный z-index */ }
+
+    // не даём окну забирать фокус у поля ввода
+    win.addEventListener('mousedown', e => e.preventDefault());
+    win.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
 
     const pts = new Map();
-    let pinch = null, tapStart = null, lastTap = 0;
+    let startDist = 0, startW = 0;
+    const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+    const num = v => parseFloat(v) || 0;
 
-    ov.addEventListener('pointerdown', e => {
-      if (e.target.closest('.stt-btn')) return;
-      ov.setPointerCapture(e.pointerId);
+    function resize(newW) {
+      const w = win.offsetWidth, h = win.offsetHeight;
+      newW = Math.min(innerWidth * 3, Math.max(80, newW));
+      const cx = num(win.style.left) + w / 2;
+      const cy = num(win.style.top) + h / 2;
+      const newH = h * newW / w;
+      win.style.width = newW + 'px';
+      win.style.left = (cx - newW / 2) + 'px';
+      win.style.top = (cy - newH / 2) + 'px';
+    }
+
+    function clamp() {
+      const w = win.offsetWidth;
+      const l = Math.min(innerWidth - 60, Math.max(60 - w, num(win.style.left)));
+      const t = Math.min(innerHeight - 60, Math.max(0, num(win.style.top)));
+      win.style.left = l + 'px';
+      win.style.top = t + 'px';
+    }
+
+    win.addEventListener('pointerdown', e => {
+      win.setPointerCapture(e.pointerId);
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pts.size === 1) {
-        tapStart = { x: e.clientX, y: e.clientY, t: Date.now(), moved: false };
-      } else if (pts.size === 2) {
-        const [a, b] = [...pts.values()];
-        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s, cx: (mx - tx) / s, cy: (my - ty) / s };
-        tapStart = null;
-      }
+      if (pts.size === 2) { startDist = dist(); startW = win.offsetWidth; }
     });
 
-    ov.addEventListener('pointermove', e => {
+    win.addEventListener('pointermove', e => {
       const p = pts.get(e.pointerId);
       if (!p) return;
       if (pts.size === 1) {
-        if (s > 1) { tx += e.clientX - p.x; ty += e.clientY - p.y; }
+        win.style.left = (num(win.style.left) + e.clientX - p.x) + 'px';
+        win.style.top = (num(win.style.top) + e.clientY - p.y) + 'px';
         p.x = e.clientX; p.y = e.clientY;
-        if (tapStart && Math.hypot(p.x - tapStart.x, p.y - tapStart.y) > 10) tapStart.moved = true;
-      } else if (pts.size === 2 && pinch) {
+        clamp();
+      } else if (pts.size === 2) {
         p.x = e.clientX; p.y = e.clientY;
-        const [a, b] = [...pts.values()];
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-        s = Math.min(8, Math.max(1, pinch.s * d / pinch.d));
-        tx = mx - pinch.cx * s;
-        ty = my - pinch.cy * s;
+        resize(startW * dist() / startDist);
       }
-      apply(false);
     });
 
-    ov.addEventListener('pointerup', e => {
-      if (!pts.has(e.pointerId)) return;
-      pts.delete(e.pointerId);
-      if (pts.size < 2) pinch = null;
-      if (pts.size === 0 && tapStart) {
-        const dx = e.clientX - tapStart.x, dy = e.clientY - tapStart.y;
-        if (!tapStart.moved && Date.now() - tapStart.t < 300) {
-          if (Date.now() - lastTap < 300) {
-            if (s > 1) { s = 1; tx = 0; ty = 0; }
-            else zoomAt(e.clientX, e.clientY, 2.5);
-            lastTap = 0;
-          } else lastTap = Date.now();
-        } else if (s === 1 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-          go(dx < 0 ? 1 : -1);
-        }
-        tapStart = null;
-      }
-      apply(true);
-    });
+    const up = e => { pts.delete(e.pointerId); };
+    win.addEventListener('pointerup', up);
+    win.addEventListener('pointercancel', up);
 
-    ov.addEventListener('pointercancel', e => {
-      pts.delete(e.pointerId); pinch = null; tapStart = null; apply(true);
-    });
-
-    ov.addEventListener('wheel', e => {
+    win.addEventListener('wheel', e => {
       e.preventDefault();
-      zoomAt(e.clientX, e.clientY, s * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
-      apply(false);
+      resize(win.offsetWidth * (e.deltaY < 0 ? 1.1 : 0.9));
     }, { passive: false });
-
-    // Собственный модальный <dialog> попадает в top layer и лежит поверх любых панелей ST
-    document.body.appendChild(ov);
-    ov.showModal();
-    load();
-    const total = root.querySelectorAll(THUMB).length;
-    dbg('показан. картинок: ' + list.length + ' из ' + total);
-    setTimeout(() => {
-      if (!ov) { dbg('просмотрщик был закрыт сам'); return; }
-      const top = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-      dbg('open=' + ov.open + ', ' + ov.clientWidth + 'x' + ov.clientHeight +
-        ', сверху: ' + (top ? top.tagName : 'нет') +
-        ', картинка: ' + (img.complete ? img.naturalWidth + 'x' + img.naturalHeight : 'грузится'));
-    }, 400);
   }
 
   // Перехватываем нажатия на миниатюры, чтобы не открывался штатный просмотрщик
@@ -200,22 +132,12 @@
     if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) { down = null; return; }
     down = null;
     try {
-      dbg('тап по миниатюре пойман');
       const u = urlOf(th);
-      if (!u) { alert('Gallery Zoom: не нашёл адрес картинки'); return; }
-      dbg('адрес: ' + u.slice(0, 80));
-      open(th);
+      if (u) open(u);
     } catch (err) {
       alert('Gallery Zoom ошибка: ' + err.message);
     }
   }, true);
 
-  document.addEventListener('keydown', e => {
-    if (!ov) return;
-    if (['Escape', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-      e.stopImmediatePropagation();
-      if (e.key === 'Escape') close();
-      else go(e.key === 'ArrowLeft' ? -1 : 1);
-    }
-  }, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
 })();
