@@ -187,12 +187,6 @@
       alert('Gallery Zoom: ' + err.message);
     }
   }, true);
-    .forEach(type => window.addEventListener(type, e => {
-      const th = e.target.closest && e.target.closest(THUMB);
-      if (!th || !th.closest(ROOT) || !urlOf(th)) return;
-      e.stopImmediatePropagation();
-      if (type === 'click') { e.preventDefault(); open(th); }
-    }, true));
 
   document.addEventListener('keydown', e => {
     if (!ov) return;
