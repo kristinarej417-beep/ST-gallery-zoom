@@ -1,0 +1,9 @@
+{
+  "display_name": "Gallery Zoom",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "author": "me",
+  "version": "1.0.0"
+}
