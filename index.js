@@ -1,6 +1,9 @@
 (() => {
   const THUMB = '.nGY2GThumbnail';
   const ROOT = '#dragGallery, #gallery, .nGY2Gallery';
+  // Как у аватарки: обычный слой ниже панелей ST (настройки, расширения и т.д.),
+  // поэтому окно видно только на странице чата. Если оно прячется под самой галереей, увеличьте Z (но не выше 2999)
+  const Z = 1000;
   let win = null;
 
   function urlOf(th) {
@@ -23,13 +26,10 @@
     close();
     const w0 = Math.min(Math.round(innerWidth * 0.7), 360);
     win = document.createElement('div');
-    // popover="manual" кладёт окно в top layer: оно поверх панели галереи,
-    // но остальной интерфейс остаётся активным (в отличие от модального <dialog>)
-    win.setAttribute('popover', 'manual');
     win.style.cssText =
-      'position:fixed;inset:auto;margin:0;padding:0;border:0;overflow:visible;background:transparent;' +
+      'position:fixed;margin:0;padding:0;' +
       `left:${innerWidth - w0 - 12}px;top:90px;width:${w0}px;height:auto;opacity:0;` +
-      'z-index:2147483000;touch-action:none;user-select:none;-webkit-user-select:none;' +
+      `z-index:${Z};touch-action:none;user-select:none;-webkit-user-select:none;` +
       'border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.5)';
 
     const img = document.createElement('img');
@@ -73,7 +73,6 @@
 
     win.append(img, btn);
     document.body.appendChild(win);
-    try { win.showPopover(); } catch (e) { /* старый браузер: останется обычный z-index */ }
     showBtn();
 
     // не даём окну забирать фокус у поля ввода
