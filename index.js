@@ -5,6 +5,7 @@
   // поэтому окно видно только на странице чата. Если оно прячется под самой галереей, увеличьте Z (но не выше 2999)
   const Z = 1000;
   let win = null;
+  let bypassUntil = 0; // пока время не вышло, нажатия на миниатюры идут в штатный просмотрщик
 
   function urlOf(th) {
     const im = th.querySelector('img');
@@ -22,7 +23,20 @@
     if (win) { win.remove(); win = null; }
   }
 
-  function open(src) {
+  // Повторяем нажатие по миниатюре, пропуская его в штатный просмотрщик
+  function openNative(target) {
+    if (!target || !target.isConnected) return;
+    bypassUntil = Date.now() + 1500;
+    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+      const init = { bubbles: true, cancelable: true, composed: true, view: window };
+      const ev = type.startsWith('pointer')
+        ? new PointerEvent(type, { ...init, pointerType: 'touch', isPrimary: true })
+        : new MouseEvent(type, init);
+      target.dispatchEvent(ev);
+    });
+  }
+
+  function open(src, target) {
     close();
     const w0 = Math.min(Math.round(innerWidth * 0.7), 360);
     win = document.createElement('div');
@@ -59,19 +73,25 @@
     btn.addEventListener('pointerdown', e => e.stopPropagation());
     btn.addEventListener('pointerup', e => { e.stopPropagation(); close(); });
 
-    // Крестик исчезает после 3 секунд бездействия и возвращается при касании окна
+    // Кнопка «⋯»: открыть эту картинку в штатном просмотрщике ST (там есть удаление)
+    const btn2 = document.createElement('div');
+    btn2.textContent = '⋯';
+    btn2.style.cssText = btn.style.cssText.replace('right:6px', 'left:6px');
+    btn2.style.transition = 'opacity .3s';
+    btn2.addEventListener('pointerdown', e => e.stopPropagation());
+    btn2.addEventListener('pointerup', e => { e.stopPropagation(); close(); openNative(target); });
+
+    // Кнопки исчезают после 3 секунд бездействия и возвращаются при касании окна
     let hideT = null;
     const showBtn = () => {
-      btn.style.opacity = '1';
-      btn.style.pointerEvents = 'auto';
+      [btn, btn2].forEach(b => { b.style.opacity = '1'; b.style.pointerEvents = 'auto'; });
       clearTimeout(hideT);
       hideT = setTimeout(() => {
-        btn.style.opacity = '0';
-        btn.style.pointerEvents = 'none';
+        [btn, btn2].forEach(b => { b.style.opacity = '0'; b.style.pointerEvents = 'none'; });
       }, 3000);
     };
 
-    win.append(img, btn);
+    win.append(img, btn, btn2);
     document.body.appendChild(win);
     showBtn();
 
@@ -139,6 +159,7 @@
   // Перехватываем нажатия на миниатюры, чтобы не открывался штатный просмотрщик
   let down = null;
   const thumbOf = e => {
+    if (Date.now() < bypassUntil) return null;
     const th = e.target.closest && e.target.closest(THUMB);
     return th && th.closest(ROOT) ? th : null;
   };
@@ -164,7 +185,7 @@
     down = null;
     try {
       const u = urlOf(th);
-      if (u) open(u);
+      if (u) open(u, e.target);
     } catch (err) {
       alert('Gallery Zoom ошибка: ' + err.message);
     }
