@@ -5,7 +5,8 @@
   // поэтому окно видно только на странице чата. Если оно прячется под самой галереей, увеличьте Z (но не выше 2999)
   const Z = 1000;
   let win = null;
-  let deleteMode = false; // режим удаления галереи (корзина): тогда нажатия идут в штатный код
+  const DEL_MS = 30000;
+  let deleteUntil = 0; // до этого времени (режим удаления, корзина) нажатия идут в штатный код
   let bypassUntil = 0; // пока время не вышло, нажатия на миниатюры идут в штатный просмотрщик
 
   function urlOf(th) {
@@ -30,9 +31,10 @@
       for (const n of m.addedNodes) {
         if (n.nodeType !== 1) continue;
         const t = n.classList && n.classList.contains('toast') ? n.textContent : '';
+        if (/drag and drop images onto the gallery/i.test(t)) deleteUntil = 0; // галерею открыли заново
         if (!/delete mode/i.test(t)) continue;
-        deleteMode = /mode is on/i.test(t);
-        if (deleteMode) close();
+        if (/mode is on/i.test(t)) { deleteUntil = Date.now() + DEL_MS; close(); }
+        else deleteUntil = 0;
       }
     }
   }).observe(document.body, { childList: true, subtree: true });
@@ -175,7 +177,7 @@
   // Перехватываем нажатия на миниатюры, чтобы не открывался штатный просмотрщик
   let down = null;
   const thumbOf = e => {
-    if (deleteMode || Date.now() < bypassUntil) return null;
+    if (Date.now() < deleteUntil || Date.now() < bypassUntil) return null;
     const th = e.target.closest && e.target.closest(THUMB);
     return th && th.closest(ROOT) ? th : null;
   };
@@ -186,6 +188,12 @@
       e.stopImmediatePropagation();
       if (type === 'click') e.preventDefault();
     }, true));
+
+  window.addEventListener('pointerup', e => {
+    if (Date.now() >= deleteUntil) return;
+    const th = e.target.closest && e.target.closest(THUMB);
+    if (th && th.closest(ROOT)) deleteUntil = Date.now() + DEL_MS;
+  }, true);
 
   window.addEventListener('pointerdown', e => {
     if (!thumbOf(e)) return;
