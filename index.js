@@ -5,6 +5,7 @@
   // поэтому окно видно только на странице чата. Если оно прячется под самой галереей, увеличьте Z (но не выше 2999)
   const Z = 1000;
   let win = null;
+  let deleteMode = false; // режим удаления галереи (корзина): тогда нажатия идут в штатный код
   let bypassUntil = 0; // пока время не вышло, нажатия на миниатюры идут в штатный просмотрщик
 
   function urlOf(th) {
@@ -22,6 +23,19 @@
   function close() {
     if (win) { win.remove(); win = null; }
   }
+
+  // Галерея сообщает о режиме удаления уведомлением «Delete mode is ON/OFF»
+  new MutationObserver(muts => {
+    for (const m of muts) {
+      for (const n of m.addedNodes) {
+        if (n.nodeType !== 1) continue;
+        const t = n.classList && n.classList.contains('toast') ? n.textContent : '';
+        if (!/delete mode/i.test(t)) continue;
+        deleteMode = /mode is on/i.test(t);
+        if (deleteMode) close();
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
 
   // Повторяем нажатие по миниатюре, пропуская его в штатный просмотрщик
   function openNative(target) {
@@ -76,7 +90,9 @@
     // Кнопка «⋯»: открыть эту картинку в штатном просмотрщике ST (там есть удаление)
     const btn2 = document.createElement('div');
     btn2.textContent = '⋯';
-    btn2.style.cssText = btn.style.cssText.replace('right:6px', 'left:6px');
+    btn2.style.cssText = btn.style.cssText;
+    btn2.style.right = 'auto';
+    btn2.style.left = '6px';
     btn2.style.transition = 'opacity .3s';
     btn2.addEventListener('pointerdown', e => e.stopPropagation());
     btn2.addEventListener('pointerup', e => { e.stopPropagation(); close(); openNative(target); });
@@ -159,7 +175,7 @@
   // Перехватываем нажатия на миниатюры, чтобы не открывался штатный просмотрщик
   let down = null;
   const thumbOf = e => {
-    if (Date.now() < bypassUntil) return null;
+    if (deleteMode || Date.now() < bypassUntil) return null;
     const th = e.target.closest && e.target.closest(THUMB);
     return th && th.closest(ROOT) ? th : null;
   };
