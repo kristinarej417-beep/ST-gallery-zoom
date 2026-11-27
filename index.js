@@ -1,13 +1,14 @@
 (() => {
-  const THUMB = '.nGY2GThumbnail';
-  const ROOT = '#dragGallery, #gallery, .nGY2Gallery';
   // Как у аватарки: обычный слой ниже панелей ST (настройки, расширения и т.д.),
   // поэтому окно видно только на странице чата. Если оно прячется под самой галереей, увеличьте Z (но не выше 2999)
   const Z = 1000;
+  const THUMB = '.nGY2GThumbnail';
+  const ROOT = '#dragGallery, #gallery, .nGY2Gallery';
+  const WAIT_MS = 700;   // сколько ждём реакцию штатного кода на нажатие
+  const DEBUG = false;   // true включает отладочные окна
+  const dbg = m => { if (DEBUG) alert('Gallery Zoom: ' + m); };
+
   let win = null;
-  const DEL_MS = 30000;
-  let deleteUntil = 0; // до этого времени (режим удаления, корзина) нажатия идут в штатный код
-  let bypassUntil = 0; // пока время не вышло, нажатия на миниатюры идут в штатный просмотрщик
 
   function urlOf(th) {
     const im = th.querySelector('img');
@@ -25,34 +26,7 @@
     if (win) { win.remove(); win = null; }
   }
 
-  // Галерея сообщает о режиме удаления уведомлением «Delete mode is ON/OFF»
-  new MutationObserver(muts => {
-    for (const m of muts) {
-      for (const n of m.addedNodes) {
-        if (n.nodeType !== 1) continue;
-        const t = n.classList && n.classList.contains('toast') ? n.textContent : '';
-        if (/drag and drop images onto the gallery/i.test(t)) deleteUntil = 0; // галерею открыли заново
-        if (!/delete mode/i.test(t)) continue;
-        if (/mode is on/i.test(t)) { deleteUntil = Date.now() + DEL_MS; close(); }
-        else deleteUntil = 0;
-      }
-    }
-  }).observe(document.body, { childList: true, subtree: true });
-
-  // Повторяем нажатие по миниатюре, пропуская его в штатный просмотрщик
-  function openNative(target) {
-    if (!target || !target.isConnected) return;
-    bypassUntil = Date.now() + 1500;
-    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
-      const init = { bubbles: true, cancelable: true, composed: true, view: window };
-      const ev = type.startsWith('pointer')
-        ? new PointerEvent(type, { ...init, pointerType: 'touch', isPrimary: true })
-        : new MouseEvent(type, init);
-      target.dispatchEvent(ev);
-    });
-  }
-
-  function open(src, target) {
+  function open(src) {
     close();
     const w0 = Math.min(Math.round(innerWidth * 0.7), 360);
     win = document.createElement('div');
@@ -89,27 +63,19 @@
     btn.addEventListener('pointerdown', e => e.stopPropagation());
     btn.addEventListener('pointerup', e => { e.stopPropagation(); close(); });
 
-    // Кнопка «⋯»: открыть эту картинку в штатном просмотрщике ST (там есть удаление)
-    const btn2 = document.createElement('div');
-    btn2.textContent = '⋯';
-    btn2.style.cssText = btn.style.cssText;
-    btn2.style.right = 'auto';
-    btn2.style.left = '6px';
-    btn2.style.transition = 'opacity .3s';
-    btn2.addEventListener('pointerdown', e => e.stopPropagation());
-    btn2.addEventListener('pointerup', e => { e.stopPropagation(); close(); openNative(target); });
-
-    // Кнопки исчезают после 3 секунд бездействия и возвращаются при касании окна
+    // Крестик исчезает после 3 секунд бездействия и возвращается при касании окна
     let hideT = null;
     const showBtn = () => {
-      [btn, btn2].forEach(b => { b.style.opacity = '1'; b.style.pointerEvents = 'auto'; });
+      btn.style.opacity = '1';
+      btn.style.pointerEvents = 'auto';
       clearTimeout(hideT);
       hideT = setTimeout(() => {
-        [btn, btn2].forEach(b => { b.style.opacity = '0'; b.style.pointerEvents = 'none'; });
+        btn.style.opacity = '0';
+        btn.style.pointerEvents = 'none';
       }, 3000);
     };
 
-    win.append(img, btn, btn2);
+    win.append(img, btn);
     document.body.appendChild(win);
     showBtn();
 
@@ -174,45 +140,69 @@
     }, { passive: false });
   }
 
-  // Перехватываем нажатия на миниатюры, чтобы не открывался штатный просмотрщик
-  let down = null;
+  // ---- Перехват штатного просмотра без таймеров ----
+  // Нажатия НЕ блокируются: штатный код сам решает, что делать.
+  //  - режим удаления: он показывает окно подтверждения (dialog), мы ничего не делаем;
+  //  - обычный режим: он открывает свою картинку, мы её прячем и показываем наше окно.
+
   const thumbOf = e => {
-    if (Date.now() < deleteUntil || Date.now() < bypassUntil) return null;
     const th = e.target.closest && e.target.closest(THUMB);
     return th && th.closest(ROOT) ? th : null;
   };
 
-  ['mousedown', 'mouseup', 'touchstart', 'touchend', 'click'].forEach(type =>
-    window.addEventListener(type, e => {
-      if (!thumbOf(e)) return;
-      e.stopImmediatePropagation();
-      if (type === 'click') e.preventDefault();
-    }, true));
+  const isOurs = n => win && (n === win || win.contains(n));
 
-  window.addEventListener('pointerup', e => {
-    if (Date.now() >= deleteUntil) return;
-    const th = e.target.closest && e.target.closest(THUMB);
-    if (th && th.closest(ROOT)) deleteUntil = Date.now() + DEL_MS;
-  }, true);
+  const isPopup = n =>
+    n.tagName === 'DIALOG' || n.classList.contains('popup') || !!n.querySelector('dialog, .popup');
 
+  // Окно штатного просмотра: новый элемент с картинкой прямо в body (или в #movingDivs)
+  const isViewer = (n, parent) => {
+    if (n.id === 'toast-container' || n.classList.contains('toast')) return false;
+    if (parent !== document.body && parent.id !== 'movingDivs') return false;
+    return n.tagName === 'IMG' || !!n.querySelector('img');
+  };
+
+  function watchTap(url) {
+    let finished = false;
+    const stray = [];
+    const finish = (showOurs, why) => {
+      if (finished) return;
+      finished = true;
+      obs.disconnect();
+      clearTimeout(timer);
+      dbg(why);
+      if (showOurs) { stray.forEach(n => n.remove()); open(url); }
+      else stray.forEach(n => n.style.removeProperty('display'));
+    };
+    const obs = new MutationObserver(muts => {
+      for (const m of muts) {
+        for (const n of m.addedNodes) {
+          if (n.nodeType !== 1 || isOurs(n)) continue;
+          if (isPopup(n)) { finish(false, 'штатный код показал окно подтверждения (режим удаления)'); return; }
+          if (isViewer(n, m.target)) {
+            n.style.setProperty('display', 'none', 'important');
+            stray.push(n);
+            finish(true, 'штатный просмотр спрятан: ' + n.tagName + (n.id ? '#' + n.id : ''));
+            return;
+          }
+        }
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    const timer = setTimeout(() => finish(true, 'штатный просмотр не найден, открыто по таймауту'), WAIT_MS);
+  }
+
+  let down = null;
   window.addEventListener('pointerdown', e => {
-    if (!thumbOf(e)) return;
-    down = { x: e.clientX, y: e.clientY };
-    e.stopImmediatePropagation();
+    down = thumbOf(e) ? { x: e.clientX, y: e.clientY } : null;
   }, true);
 
   window.addEventListener('pointerup', e => {
     const th = thumbOf(e);
-    if (!th) return;
-    e.stopImmediatePropagation();
-    if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) { down = null; return; }
-    down = null;
-    try {
-      const u = urlOf(th);
-      if (u) open(u, e.target);
-    } catch (err) {
-      alert('Gallery Zoom ошибка: ' + err.message);
-    }
+    const d = down; down = null;
+    if (!th || !d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10) return;
+    const url = urlOf(th);
+    if (url) watchTap(url);
   }, true);
 
   document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
